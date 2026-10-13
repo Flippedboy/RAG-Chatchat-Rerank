@@ -43,6 +43,26 @@ from chatchat.server.utils import (
 
 logger = build_logger()
 
+# Rerank 重排模型实例缓存（懒加载，避免每次检索重复加载模型）
+_reranker_instance = None
+
+
+def get_reranker():
+    """懒加载并缓存 Rerank 重排模型（CrossEncoder）。"""
+    global _reranker_instance
+    if _reranker_instance is None:
+        from chatchat.server.reranker.reranker import LangchainReranker
+
+        _reranker_instance = LangchainReranker(
+            model_name_or_path=Settings.kb_settings.RERANKER_MODEL,
+            top_n=Settings.kb_settings.RERANKER_TOP_N,
+            device=Settings.kb_settings.RERANKER_DEVICE,
+            max_length=Settings.kb_settings.RERANKER_MAX_LENGTH,
+            batch_size=Settings.kb_settings.RERANKER_BATCH_SIZE,
+        )
+        logger.info(f"Rerank model loaded: {Settings.kb_settings.RERANKER_MODEL}")
+    return _reranker_instance
+
 
 class SupportedVSType:
     FAISS = "faiss"
@@ -208,6 +228,18 @@ class KBService(ABC):
             return []
 
         docs = self.do_search(query, top_k, score_threshold)
+
+        # ========== Rerank 重排（二次开发新增）==========
+        # 向量检索属于粗排，召回结果可能存在语义不相关片段。
+        # 开启 USE_RERANKER 后，使用 CrossEncoder 对召回结果做精细相关性打分并过滤，提升送入 LLM 的上下文质量。
+        if Settings.kb_settings.USE_RERANKER and docs:
+            try:
+                docs = get_reranker().compress_documents(documents=docs, query=query)
+                logger.info(
+                    f"Rerank applied: {len(docs)} docs after rerank (top_n={Settings.kb_settings.RERANKER_TOP_N})."
+                )
+            except Exception as e:
+                logger.error(f"Rerank failed, fallback to raw results: {e}")
         return docs
 
     def get_doc_by_ids(self, ids: List[str]) -> List[Document]:

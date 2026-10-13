@@ -156,6 +156,26 @@ class KBSettings(BaseFileSettings):
     SCORE_THRESHOLD: float = 2.0
     """知识库匹配相关度阈值，取值范围在0-2之间，SCORE越小，相关度越高，取到2相当于不筛选，建议设置在0.5左右"""
 
+    # ========== Rerank 重排模块配置（二次开发新增）==========
+    USE_RERANKER: bool = False
+    """是否启用 Rerank 重排。默认为 False（关闭），按需自主选择是否开启。
+    开启后，知识库向量召回的结果会经过 CrossEncoder 重排，过滤低相关片段后再送入 LLM。"""
+
+    RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+    """Rerank 重排模型名称或本地路径，可使用 HuggingFace 上的 bge-reranker 系列模型"""
+
+    RERANKER_TOP_N: int = 3
+    """重排后保留的文档条数，即送入 LLM 的上文片段数量。建议小于等于向量召回的 top_k"""
+
+    RERANKER_MAX_LENGTH: int = 512
+    """Rerank 模型单条输入的最大长度，超过会被截断。请与知识库 chunk 大小配合设置"""
+
+    RERANKER_DEVICE: str = "cpu"
+    """Rerank 模型运行设备，可选 cpu / cuda"""
+
+    RERANKER_BATCH_SIZE: int = 32
+    """Rerank 模型批处理大小"""
+
     DEFAULT_SEARCH_ENGINE: t.Literal["bing", "duckduckgo", "metaphor", "searx"] = "duckduckgo"
     """默认搜索引擎"""
 
