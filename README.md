@@ -1,4 +1,4 @@
-# RAG\-Chatchat\-Rerank
+﻿# RAG\-Chatchat\-Rerank
 
 ## 项目简介
 
@@ -58,15 +58,17 @@
 
 ### 2\. 本项目实现策略
 
-- 向量检索阶段：召回 **Top6** 候选片段，保证候选多样性；
+- 向量检索阶段：使用 `VECTOR_SEARCH_TOP_K` 召回候选片段，保证候选多样性；
 
-- 重排阶段：使用 **BAAI/bge\-reranker\-base** 对所有候选打分；
+- 重排阶段：使用 **BAAI/bge\-reranker\-base**（CrossEncoder）对「Query + 每个候选片段」联合打分；
 
-- 过滤策略：设置分数阈值 **0\.01**，丢弃低相关噪声；
+- 过滤策略：按相关性分数排序，只保留 `RERANKER_TOP_N`（默认 3）个最相关片段送入 LLM；
 
-- 最终筛选：保留相关性最高 **Top3** 片段送入 LLM；
+- 模型全局单例懒加载，仅在首次开启重排时加载一次，避免重复加载导致推理卡顿；
 
-- 模型全局单例加载，避免重复加载导致推理卡顿。
+- **重排可通过 `USE_RERANKER` 配置项自主开关**，默认关闭，不影响原生检索链路。
+
+> 详细改动文件、配置项与效果对比方法见 [docs/RERANK_IMPLEMENTATION.md](./docs/RERANK_IMPLEMENTATION.md)。
 
 ### 3\. 优化收益
 
@@ -145,15 +147,13 @@ python startup.py
 
 ## 项目核心改动点
 
-基于原生 Chatchat 最小侵入式改造：
+基于原生 Chatchat 最小侵入式改造，共改动 3 个文件：
 
-- 新增全局 Rerank 模型加载逻辑，全局单次初始化，提升推理速度；
+- **`chatchat/settings.py`**：在 `KBSettings` 中新增 `USE_RERANKER` 等 Rerank 配置项，支持开关与模型参数；
+- **`chatchat/server/knowledge_base/kb_service/base.py`**：新增 `get_reranker()` 全局单例懒加载函数；在所有向量库共用的检索入口 `KBService.search_docs()` 中，向量粗排召回后、返回前注入 CrossEncoder 重排，重排失败自动回退原始结果；
+- **`libs/chatchat-server/pyproject.toml`**：声明 `sentence-transformers` 依赖。
 
-- 在 `kb_service.py` 检索链路中植入重排打分、阈值过滤、结果重排序逻辑；
-
-- 优化检索候选数量与最终送入 LLM 片段数量，平衡精度与速度；
-
-- 完整测试对比优化前后问答效果，留存测试案例。
+改动遵循「默认关闭、按需开启」原则：关闭时不加载模型、完全不影响原有流程；开启后才对召回结果做精排过滤。
 
 ## 开发踩坑记录
 
@@ -167,9 +167,9 @@ python startup.py
 **解决**：限制分块大小，控制输入长度，避免无效截断丢失信息。
       
 
-- **问题3**：阈值过低导致噪声多、过高召回过少
+- **问题3**：`RERANKER_TOP_N` 与向量召回 `VECTOR_SEARCH_TOP_K` 数量不匹配
         
-**解决**：经过多轮测试确定 0\.01 为最优平衡阈值。
+**解决**：重排候选数应小于等于向量召回数，经多轮测试将 `RERANKER_TOP_N` 设为 3，在精度与速度间取得平衡。
 
 ## 未来优化方向
 
